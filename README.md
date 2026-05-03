@@ -11,6 +11,7 @@ community discovers what's next via a feed with a Best Performer spotlight.
 ## Live demo
 
 - **URL:** https://d-clef-music.netlify.app
+- **Source:** https://github.com/atulshivade/d_clef_music
 - **Teacher login:** `admin@portal.dev` / `Password123`
 - **Student logins:** `alex@portal.dev` / `Password123`, `riya@portal.dev` / `Password123`
 
