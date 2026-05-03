@@ -29,7 +29,9 @@ export function ChallengeCard({ challenge }: { challenge: Challenge }) {
           className="h-32 w-full object-cover transition-transform duration-500 group-hover:scale-105"
         />
       ) : (
-        <div className="h-32 w-full bg-gradient-to-br from-primary/30 via-accent/20 to-primary/10" />
+        <div className="relative h-32 w-full overflow-hidden bg-gradient-to-br from-primary/55 via-accent/40 to-primary/20">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,white,transparent_60%)] opacity-10" />
+        </div>
       )}
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">

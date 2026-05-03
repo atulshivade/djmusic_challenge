@@ -266,6 +266,40 @@ powershell -File scripts\sanity.ps1 -Email alex@portal.dev  -Password Password12
 powershell -File scripts\sanity-write.ps1
 ```
 
+## End-to-end tests (Playwright)
+
+A full Playwright suite under `tests/e2e/` exercises both the UI and the
+backend on the deployed Netlify site (override with `BASE_URL=...` for local).
+
+```powershell
+# Run against the live demo (default)
+npm test
+
+# Run against `npm run dev` on localhost
+$env:BASE_URL = "http://localhost:3000"
+npm test
+```
+
+The suite covers:
+
+- **Public** — landing renders, sign-in / sign-up forms, anon redirects from
+  `/admin` and `/feed` to `/sign-in`, **dark theme is in effect** (body bg
+  lightness < 15, foreground > 85; catches a missing-stylesheet regression).
+- **Auth & feed** — student sign-in lands on `/challenges` with seeded data,
+  feed shows the Best Performer spotlight, **liking a performance increases
+  the like count**.
+- **Teacher / admin** — dashboard stats render, `/admin/evaluate` exposes
+  Verify / Crown Best / Add feedback, **the new date-time picker** has a
+  visible trigger (not a hidden icon-only one) and **closes immediately on
+  date selection**, the create-challenge form actually creates a challenge
+  and redirects, and an invalid submission shows an inline error rather than
+  a 500 page.
+- **API health** — `/api/auth/session` returns JSON for anon, `/api/admin/dbinit`
+  refuses requests without a valid secret, `/api/upload/video` refuses
+  anonymous uploads.
+
+Open the HTML report after a run with `npm run test:report`.
+
 ---
 
 ## What's done vs. what's next
