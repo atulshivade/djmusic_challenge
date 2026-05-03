@@ -34,12 +34,19 @@ function buildPgliteSync():
   | ReturnType<typeof drizzlePostgres>
   | null {
   try {
+    /* eslint-disable @typescript-eslint/no-require-imports --
+     * Intentional dynamic requires: keep PGlite (and its WASM binary) out of
+     * the OpenNext / Netlify Function static import graph so the production
+     * bundle only ships postgres-js. Without this, Lambda cold start crashes
+     * trying to load PGlite's bundled WASM. See commit c5bf91c.
+     */
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
     const { drizzle: drizzlePglite } =
       require("drizzle-orm/pglite") as typeof import("drizzle-orm/pglite");
     const { PGlite } =
       require("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
+    /* eslint-enable @typescript-eslint/no-require-imports */
 
     const url = process.env.DATABASE_URL ?? process.env.NETLIFY_DATABASE_URL ?? process.env.NETLIFY_DB_URL;
     if (url === "memory:") {
