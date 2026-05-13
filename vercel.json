@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "functions": {
+    "src/app/api/upload/video/route.ts": {
+      "memory": 1024,
+      "maxDuration": 60
+    },
+    "src/app/api/admin/dbinit/route.ts": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  }
+}

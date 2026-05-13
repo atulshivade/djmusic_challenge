@@ -18,10 +18,10 @@ spotlight. Mobile-first banded layout that scales cleanly to laptop and tablet.
 
 > The seed includes 3 challenges, 2 sample performances and one **Best
 > Performer** (Riya's Chopin take). When deploying to a serverless host
-> (Netlify Functions, Vercel) point `VIDEO_PROVIDER` at a remote provider
-> (Cloudinary / Bunny / Vimeo) so the FILE upload tab stays enabled — the
-> [Deploying to Netlify](#deploying-to-netlify-or-any-ephemeral-fs-host)
-> section below walks through the env vars step-by-step.
+> (Vercel, AWS Lambda, Netlify, Cloudflare Workers) point `VIDEO_PROVIDER`
+> at a remote provider (Cloudinary / Bunny / Vimeo) so the FILE upload
+> tab stays enabled — the [Deploying](#deploying) section below walks
+> through the env vars step-by-step.
 
 ---
 
@@ -264,59 +264,109 @@ S3 also moves your dev video uploads to S3.
 
 ---
 
-## Deploying to Netlify (or any ephemeral-FS host)
+## Deploying
 
-Netlify Functions run on Lambdas whose filesystem **disappears on every cold
-start** — writing video bytes to `public/uploads/` would silently lose them.
-The app detects this (`IS_NETLIFY=true` is baked into `netlify.toml`) and
-disables the FILE upload tab until a *remote* video provider is configured.
+The app is **platform-agnostic** — there's no vendor-specific config file
+in the repo. Anywhere you can run a Next.js 16 app and reach a Postgres
+URL works: Vercel, Render, Fly, Cloudflare Pages, AWS Amplify, a $5 VPS,
+your laptop.
 
-The capability gate is **video-provider-aware**: as soon as you point
-`VIDEO_PROVIDER` at any of `cloudinary`, `bunny` or `vimeo`, the bytes
-stream straight from the Lambda to the provider and the FILE tab comes back
-automatically. Nothing else has to change.
+On any serverless runtime (Vercel, AWS Lambda, Netlify Functions, etc.)
+the Lambda's filesystem **disappears on every cold start**, so writing
+video bytes to `public/uploads/` would silently lose them. The app
+auto-detects this via `VERCEL=1` / `AWS_LAMBDA_FUNCTION_NAME` /
+`NETLIFY=true` / `EPHEMERAL_FS=true` and disables the FILE upload tab
+*unless* a remote video provider is configured. As soon as you point
+`VIDEO_PROVIDER` at `cloudinary`, `bunny`, or `vimeo`, bytes stream
+straight from the function to the provider's durable storage and the
+FILE tab comes back automatically.
 
-### Quickest path — Cloudinary (free tier covers most pilots)
+### Vercel (recommended for Next.js)
 
-1. Sign up at [cloudinary.com](https://cloudinary.com/users/register/free)
-   (25 GB combined storage + bandwidth per month, automatic adaptive
-   streaming and thumbnails, signed server-side uploads).
-2. In **Netlify → Site settings → Environment variables**, add:
+1. Create a free Postgres at [neon.tech](https://neon.tech) — sign in
+   with GitHub, pick the EU/US region nearest your users, copy the
+   **Pooled connection** string from the project dashboard.
+2. [vercel.com](https://vercel.com) → **Add New Project** → import this
+   repo. Framework auto-detected as Next.js.
+3. Before clicking Deploy, paste the env-var block (see `.env.example`)
+   into **Environment Variables**. Minimum required for production:
 
    | Key | Value |
    |---|---|
-   | `VIDEO_PROVIDER` | `cloudinary` |
-   | `CLOUDINARY_URL` | `cloudinary://<api_key>:<api_secret>@<cloud_name>` *(copy-paste from the Cloudinary dashboard)* |
+   | `DATABASE_URL` | the Neon pooled connection string from step 1 |
+   | `AUTH_SECRET` | `npx auth secret` or `openssl rand -base64 32` |
+   | `AUTH_TRUST_HOST` | `true` |
+   | `VIDEO_PROVIDER` | `cloudinary` *(or `bunny` / `vimeo`)* |
+   | `CLOUDINARY_URL` | `cloudinary://<key>:<secret>@<cloud_name>` |
    | `CLOUDINARY_FOLDER` | `shred-sound-music/performances` *(optional)* |
 
-   You can also use the discrete trio `CLOUDINARY_CLOUD_NAME` +
-   `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` if you prefer.
-3. Trigger a fresh deploy. The next visit to a challenge page will show the
-   FILE tab and uploads will land in your Cloudinary account.
+4. Deploy. The instrumentation hook applies the idempotent schema on
+   cold start so the DB lands at spec automatically. For demo seeding,
+   hit `https://<vercel-domain>/api/admin/dbinit?secret=<AUTH_SECRET>`
+   once — it inserts the teacher + two student accounts and three
+   starter challenges.
+5. Custom domain: **Vercel → Project → Settings → Domains** → add
+   `your.domain.com`. Vercel shows the CNAME target — add a matching
+   record in your DNS provider (Cloudflare, GoDaddy, etc.):
 
-### Alternative — Bunny.net Stream (paid but very cheap, native HLS)
+   ```
+   Type:  CNAME
+   Host:  whatever-subdomain        (use `@` for the apex)
+   Value: cname.vercel-dns.com
+   ```
 
-   | Key | Value |
-   |---|---|
-   | `VIDEO_PROVIDER` | `bunny` |
-   | `BUNNY_STREAM_LIBRARY_ID` | from the Stream dashboard |
-   | `BUNNY_STREAM_API_KEY` | from the Stream dashboard |
-   | `BUNNY_STREAM_CDN_HOSTNAME` | e.g. `vz-abcdef-123.b-cdn.net` |
+   SSL is issued automatically a few minutes later. If you front the
+   site with Cloudflare DNS, set the proxy status to **DNS only** (grey
+   cloud) so Vercel can complete its certificate challenge.
 
-### Alternative — Vimeo (drop-in private/unlisted hosting)
+6. (Optional, recommended) Align the Vercel function region with the
+   Neon region you picked in step 1 to cut DB latency. **Settings →
+   Functions → Region** (or add `"regions": ["fra1"]` to `vercel.json`
+   for Europe, `"bom1"` for Mumbai, `"iad1"` for US East). The repo's
+   `vercel.json` deliberately omits the pin so the default matches your
+   Neon project location.
 
-   | Key | Value |
-   |---|---|
-   | `VIDEO_PROVIDER` | `vimeo` |
-   | `VIMEO_ACCESS_TOKEN` | an OAuth token with `upload` scope |
+6. (Optional, recommended) Align the Vercel function region with the
+   Neon region you picked in step 1 to cut DB latency. In Vercel:
+   **Settings → Functions → Region** (or add `"regions": ["fra1"]` to
+   `vercel.json` for Europe, `"bom1"` for Mumbai, `"iad1"` for US East,
+   etc.). The repo's `vercel.json` deliberately omits the pin so the
+   default matches your Neon project location.
 
-### What NOT to set on Netlify
+### Cloudinary credentials — two equivalent formats
+
+| Format | When to use |
+|---|---|
+| `CLOUDINARY_URL=cloudinary://<key>:<secret>@<cloud_name>` | Copy-paste from the Cloudinary dashboard. Recommended. |
+| `CLOUDINARY_CLOUD_NAME` + `CLOUDINARY_API_KEY` + `CLOUDINARY_API_SECRET` | When the platform's secrets manager prefers discrete keys. |
+
+Either works. If both are set, the discrete trio wins per-field.
+
+### Alternative video providers
+
+**Bunny.net Stream** — paid but very cheap, native HLS:
+
+| Key | Value |
+|---|---|
+| `VIDEO_PROVIDER` | `bunny` |
+| `BUNNY_STREAM_LIBRARY_ID` | from the Stream dashboard |
+| `BUNNY_STREAM_API_KEY` | from the Stream dashboard |
+| `BUNNY_STREAM_CDN_HOSTNAME` | e.g. `vz-abcdef-123.b-cdn.net` |
+
+**Vimeo** — drop-in private/unlisted hosting:
+
+| Key | Value |
+|---|---|
+| `VIDEO_PROVIDER` | `vimeo` |
+| `VIMEO_ACCESS_TOKEN` | an OAuth token with `upload` scope |
+
+### What NOT to set in production
 
 - ❌ `ALLOW_INSECURE_TLS` — dev-only escape hatch for corporate proxies.
-  The instrumentation hook refuses to apply it when `NODE_ENV=production`,
-  but don't add noise.
-- ❌ Anything that looks like a real secret in `IS_NETLIFY`,
-  `AUTH_TRUST_HOST` — those are already pinned in `netlify.toml`.
+  The instrumentation hook refuses to apply it when `NODE_ENV=production`
+  but don't add the noise.
+- ❌ `DATABASE_URL=memory:` — that's the in-memory PGlite for unit tests
+  only; everything resets on every cold start.
 
 ---
 
@@ -390,10 +440,12 @@ The suite covers:
   reports a coherent posture (`uploadsEnabled` boolean + storageProvider
   + videoProvider).
 - **Capability matrix** — `getUploadCapabilities()` returns
-  `uploadsEnabled=false` only when the runtime is ephemeral (`IS_NETLIFY`
-  or `NETLIFY`) AND the video provider is `local`; any remote video
-  provider (`cloudinary` / `bunny` / `vimeo`) flips the FILE tab back on
-  automatically. Seven dedicated specs cover every cell of that matrix.
+  `uploadsEnabled=false` only when the runtime is ephemeral (auto-detected
+  via `VERCEL=1` / `AWS_LAMBDA_FUNCTION_NAME` / `NETLIFY=true` /
+  `EPHEMERAL_FS=true`) AND the video provider is `local`; any remote
+  video provider (`cloudinary` / `bunny` / `vimeo`) flips the FILE tab
+  back on automatically. Seven dedicated specs cover every cell of that
+  matrix.
 
 Open the HTML report after a run with `npm run test:report`.
 

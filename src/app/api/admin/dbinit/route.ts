@@ -1,23 +1,27 @@
 /**
  * One-shot bootstrap route — applies the schema (idempotent CREATE IF NOT
  * EXISTS / DO blocks) and seeds demo data on a freshly-provisioned managed
- * Postgres (Netlify DB / Neon / Supabase).
+ * Postgres (Neon / Supabase / RDS / self-hosted).
  *
  * Why this exists
  * ---------------
  * The author's machine sits behind a corporate proxy whose self-signed cert
  * chain breaks every CLI path that wants to reach the production DB
- * (`netlify database connect`, direct `psql`, drizzle-kit push). To avoid
- * leaking credentials and to make the deploy fully reproducible, the
- * bootstrap runs inside the deployed Netlify Function, where
- * `NETLIFY_DATABASE_URL` is auto-injected and the upstream network works.
+ * (`psql`, `drizzle-kit push`, vendor CLIs). To avoid leaking credentials
+ * and to make the deploy fully reproducible, the bootstrap runs inside the
+ * deployed serverless function, where `DATABASE_URL` is configured and the
+ * upstream network works.
+ *
+ * On cold start the same statements are also applied automatically by the
+ * instrumentation hook (`src/instrumentation.ts`) — this route remains the
+ * manual escape hatch for a fresh DB or for forcing a re-seed.
  *
  * Auth: `?secret=<AUTH_SECRET>` must match the env var. The route is
  * idempotent — calling it twice is safe (it skips already-seeded rows and
  * uses CREATE IF NOT EXISTS for DDL).
  *
  * Usage:
- *   GET https://shred-sound-music.netlify.app/api/admin/dbinit?secret=...
+ *   GET https://<your-deploy-host>/api/admin/dbinit?secret=...
  */
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
@@ -193,8 +197,7 @@ export async function GET(req: Request) {
 
   const startedAt = Date.now();
   try {
-    const dbUrl =
-      process.env.DATABASE_URL ?? process.env.NETLIFY_DATABASE_URL ?? process.env.NETLIFY_DB_URL ?? "";
+    const dbUrl = process.env.DATABASE_URL ?? "";
     const dbHost = (() => {
       try {
         return new URL(dbUrl).host;

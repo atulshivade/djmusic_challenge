@@ -9,9 +9,10 @@ import { classifyActionFailure } from "../../src/lib/action-errors";
 import { SCHEMA_STATEMENTS } from "../../src/db/schema-bootstrap";
 
 /**
- * Tiny harness for the env-driven capability matrix. We need to flip
- * STORAGE_PROVIDER / VIDEO_PROVIDER / IS_NETLIFY per case and restore
- * the originals so the rest of the suite is unaffected.
+ * Tiny harness for the env-driven capability matrix. We flip
+ * STORAGE_PROVIDER / VIDEO_PROVIDER and the platform-detection markers
+ * (VERCEL / AWS_LAMBDA_FUNCTION_NAME / NETLIFY / EPHEMERAL_FS) per case
+ * and restore the originals so the rest of the suite is unaffected.
  */
 function withEnv(
   overrides: Record<string, string | undefined>,
@@ -32,6 +33,14 @@ function withEnv(
     }
   }
 }
+
+/** Keys we sweep when we want a guaranteed-non-ephemeral environment. */
+const NON_EPHEMERAL_OVERRIDES = {
+  VERCEL: undefined,
+  AWS_LAMBDA_FUNCTION_NAME: undefined,
+  NETLIFY: undefined,
+  EPHEMERAL_FS: undefined,
+} as const;
 
 /**
  * Backend smoke tests — hit the Functions / Next API routes directly to
@@ -289,12 +298,17 @@ test.describe("Schema / validator alignment", () => {
  * Capability matrix — the core gate that decides whether the UI shows
  * the FILE tab or steers users to YouTube/Vimeo links.
  *
- * Real-world bug this protects against: on Netlify the FS is ephemeral
- * so STORAGE_PROVIDER=local is unsafe — but when VIDEO_PROVIDER points
- * at Cloudinary/Bunny/Vimeo, the bytes stream straight to the cloud and
- * never touch our disk. Uploads must therefore stay enabled. We tripped
- * over this in production when the live site kept showing "Direct file
- * uploads are off" even after Cloudinary was wired.
+ * Real-world bug this protects against: on any serverless runtime the
+ * filesystem is ephemeral so STORAGE_PROVIDER=local is unsafe — but
+ * when VIDEO_PROVIDER points at Cloudinary/Bunny/Vimeo, the bytes
+ * stream straight to the cloud and never touch our disk. Uploads must
+ * therefore stay enabled. We tripped over this in production when the
+ * live site kept showing "Direct file uploads are off" even after
+ * Cloudinary was wired.
+ *
+ * The detector probes well-known platform markers (`VERCEL`,
+ * `AWS_LAMBDA_FUNCTION_NAME`, `NETLIFY`, `EPHEMERAL_FS`) so devs don't
+ * have to remember to flip a flag per host.
  */
 test.describe("getUploadCapabilities()", () => {
   test("local storage + local video on a normal host -> uploads enabled", () => {
@@ -302,8 +316,7 @@ test.describe("getUploadCapabilities()", () => {
       {
         STORAGE_PROVIDER: undefined,
         VIDEO_PROVIDER: undefined,
-        IS_NETLIFY: undefined,
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
       },
       () => {
         const caps = getUploadCapabilities();
@@ -315,13 +328,13 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("local storage + local video on Netlify -> uploads disabled with a reason", () => {
+  test("local storage + local video on Vercel -> uploads disabled with a reason", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "local",
         VIDEO_PROVIDER: "local",
-        IS_NETLIFY: "true",
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        VERCEL: "1",
       },
       () => {
         const caps = getUploadCapabilities();
@@ -334,13 +347,13 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("VIDEO_PROVIDER=cloudinary on Netlify -> uploads ENABLED", () => {
+  test("VIDEO_PROVIDER=cloudinary on Vercel -> uploads ENABLED", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "local",
         VIDEO_PROVIDER: "cloudinary",
-        IS_NETLIFY: "true",
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        VERCEL: "1",
       },
       () => {
         const caps = getUploadCapabilities();
@@ -351,13 +364,13 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("VIDEO_PROVIDER=bunny on Netlify -> uploads ENABLED", () => {
+  test("VIDEO_PROVIDER=bunny on Vercel -> uploads ENABLED", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "local",
         VIDEO_PROVIDER: "bunny",
-        IS_NETLIFY: "true",
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        VERCEL: "1",
       },
       () => {
         const caps = getUploadCapabilities();
@@ -367,13 +380,13 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("VIDEO_PROVIDER=vimeo on Netlify -> uploads ENABLED", () => {
+  test("VIDEO_PROVIDER=vimeo on Vercel -> uploads ENABLED", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "local",
         VIDEO_PROVIDER: "vimeo",
-        IS_NETLIFY: "true",
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        VERCEL: "1",
       },
       () => {
         const caps = getUploadCapabilities();
@@ -383,13 +396,13 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("upper-case env values are accepted (Netlify dashboard often shouts)", () => {
+  test("upper-case env values are accepted (some dashboards shout)", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "LOCAL",
         VIDEO_PROVIDER: "CLOUDINARY",
-        IS_NETLIFY: "true",
-        NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        VERCEL: "1",
       },
       () => {
         const caps = getUploadCapabilities();
@@ -399,13 +412,44 @@ test.describe("getUploadCapabilities()", () => {
     );
   });
 
-  test("NETLIFY=true (system var) is recognised the same as IS_NETLIFY", () => {
+  test("AWS_LAMBDA_FUNCTION_NAME marks the runtime as ephemeral", () => {
     withEnv(
       {
         STORAGE_PROVIDER: "local",
         VIDEO_PROVIDER: "local",
-        IS_NETLIFY: undefined,
+        ...NON_EPHEMERAL_OVERRIDES,
+        AWS_LAMBDA_FUNCTION_NAME: "some-lambda",
+      },
+      () => {
+        const caps = getUploadCapabilities();
+        expect(caps.uploadsEnabled).toBe(false);
+        expect(caps.reason).toMatch(/ephemeral/i);
+      },
+    );
+  });
+
+  test("NETLIFY=true is recognised (legacy parity)", () => {
+    withEnv(
+      {
+        STORAGE_PROVIDER: "local",
+        VIDEO_PROVIDER: "local",
+        ...NON_EPHEMERAL_OVERRIDES,
         NETLIFY: "true",
+      },
+      () => {
+        const caps = getUploadCapabilities();
+        expect(caps.uploadsEnabled).toBe(false);
+      },
+    );
+  });
+
+  test("EPHEMERAL_FS=true is the manual override for unrecognised hosts", () => {
+    withEnv(
+      {
+        STORAGE_PROVIDER: "local",
+        VIDEO_PROVIDER: "local",
+        ...NON_EPHEMERAL_OVERRIDES,
+        EPHEMERAL_FS: "true",
       },
       () => {
         const caps = getUploadCapabilities();

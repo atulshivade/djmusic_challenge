@@ -63,8 +63,8 @@ export function PerformanceUploader({
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [caps, setCaps] = useState<UploadCapabilities | null>(null);
   // Default to EMBED until we hear back from the server. If direct uploads
-  // are disabled (e.g. on the Netlify demo) the user never sees a broken
-  // FILE tab.
+  // are disabled (e.g. on a serverless host without a remote video provider)
+  // the user never sees a broken FILE tab.
   const [mode, setMode] = useState<Mode>("EMBED");
 
   useEffect(() => {
@@ -144,8 +144,8 @@ export function PerformanceUploader({
       if (!res.ok) {
         // Try to parse a JSON error body (our route always returns one).
         // If the response is plain text (e.g. an upstream gateway 500 from
-        // exceeding Netlify's request body limit), fall back to a friendly
-        // message that points at the embed flow.
+        // exceeding the hosting platform's request body limit), fall back
+        // to a friendly message that points at the embed flow.
         const ct = res.headers.get("content-type") ?? "";
         if (ct.includes("application/json")) {
           const j = await res.json().catch(() => ({}));

@@ -30,7 +30,7 @@ export function classifyActionFailure(
       ok: false,
       error:
         "Database schema is behind the deployed app. Trigger a fresh " +
-        "Netlify deploy (the cold start auto-applies the bootstrap) or " +
+        "deploy (the cold-start hook auto-applies the bootstrap) or " +
         "GET /api/admin/dbinit?secret=<AUTH_SECRET> once to bring the " +
         `DB to spec. Underlying: ${message}`,
     };
@@ -51,7 +51,8 @@ export function classifyActionFailure(
   // ── Generic fallback ──────────────────────────────────────────────
   // Production keeps it brief but ALWAYS includes a fragment of the
   // underlying message so a support engineer can correlate with the
-  // Netlify function log line emitted at the same moment.
+  // server-log line emitted at the same moment (visible in your
+  // hosting platform's function/runtime logs).
   return {
     ok: false,
     error:

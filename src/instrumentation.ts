@@ -39,10 +39,10 @@ export async function register() {
     return;
   }
 
-  // On the production postgres path (Netlify-managed Postgres / Neon /
-  // Supabase) auto-apply the idempotent schema bootstrap so adding a new
-  // enum value or column on a deploy never requires the operator to
-  // manually hit `/api/admin/dbinit?secret=…`.
+  // On the production postgres path (Neon / Supabase / RDS / any
+  // managed Postgres) auto-apply the idempotent schema bootstrap so
+  // adding a new enum value or column on a deploy never requires the
+  // operator to manually hit `/api/admin/dbinit?secret=…`.
   //
   // Every statement uses `IF NOT EXISTS` or a DO/EXCEPTION block so this
   // is cheap and safe to run on every cold start. The bootstrap completes
@@ -67,7 +67,7 @@ export async function register() {
   } catch (err) {
     // Don't crash the server on a bootstrap failure — the dbinit route
     // remains the manual escape hatch. Just log loudly so it's obvious
-    // in the Netlify function logs.
+    // in the hosting platform's runtime logs.
     console.error(
       "[db] postgres schema bootstrap FAILED — fall back to /api/admin/dbinit?secret=… to recover:",
       err,

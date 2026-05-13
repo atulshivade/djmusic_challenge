@@ -28,8 +28,8 @@ export type ActionResult =
  * Translate a raw DB / runtime exception into something safe and useful
  * for the client. The pure mapping lives in `action-errors.ts` (a regular
  * module — server-action files can only export async functions). Here we
- * just add the `console.error` side effect so Netlify Function logs
- * always capture the full stack.
+ * just add the `console.error` side effect so the hosting platform's
+ * runtime logs always capture the full stack.
  */
 function describeActionError(
   err: unknown,

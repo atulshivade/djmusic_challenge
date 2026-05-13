@@ -11,8 +11,8 @@
  *
  * These statements are the canonical source for:
  *   1. `src/app/api/admin/dbinit/route.ts` — the one-shot admin endpoint
- *      operators hit to bring a fresh Netlify-managed Postgres / Neon /
- *      Supabase up to spec.
+ *      operators hit to bring a fresh managed Postgres (Neon / Supabase /
+ *      RDS / self-hosted) up to spec.
  *   2. `src/instrumentation.ts` — auto-heals on cold start so adding a new
  *      enum value or column to the live deploy never requires manual SQL.
  *

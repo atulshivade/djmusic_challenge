@@ -77,9 +77,9 @@ function guessExt(contentType: string): string {
 }
 
 /**
- * Refuses uploads with a clear message. Used on Netlify (or any other
- * serverless host) where the filesystem is ephemeral, so writing to disk
- * would silently lose files on the next cold start.
+ * Refuses uploads with a clear message. Used on any serverless host
+ * where the filesystem is ephemeral, so writing to disk would silently
+ * lose files on the next cold start.
  */
 class EphemeralFsGuardProvider implements IStorageProvider {
   async upload(): Promise<StoredFile> {
@@ -97,18 +97,40 @@ let _provider: IStorageProvider | null = null;
 const REMOTE_VIDEO_PROVIDERS = new Set(["cloudinary", "bunny", "vimeo"]);
 
 /**
+ * Detects whether the current process runs on a serverless host whose
+ * filesystem evaporates between cold starts. We probe the well-known
+ * platform markers rather than asking developers to flip a flag.
+ *
+ *  - `VERCEL=1`                 — Vercel Serverless / Edge Functions
+ *  - `AWS_LAMBDA_FUNCTION_NAME` — any AWS Lambda (incl. SST, OpenNext, Amplify)
+ *  - `NETLIFY=true`             — Netlify Functions (kept for legacy parity)
+ *  - `EPHEMERAL_FS=true`        — explicit override for other hosts
+ *
+ * If you're running on a long-lived VM (Render Web Service, Fly machine,
+ * a Docker container, your laptop) none of these are set and direct file
+ * uploads remain enabled.
+ */
+function isEphemeralRuntime(): boolean {
+  return (
+    process.env.VERCEL === "1" ||
+    typeof process.env.AWS_LAMBDA_FUNCTION_NAME === "string" ||
+    process.env.NETLIFY === "true" ||
+    process.env.EPHEMERAL_FS === "true"
+  );
+}
+
+/**
  * Reports whether direct file uploads are usable in the current runtime.
  *
  * The UI uses this to gate its FILE tab and steer students toward the
- * URL/embed flow on hosts where the local filesystem is ephemeral
- * (Netlify Lambda, etc.). The API route uses it to short-circuit with a
- * clean 503 instead of letting the upstream Lambda reject the body with
- * an opaque "Internal Error".
+ * URL/embed flow on hosts where the local filesystem is ephemeral. The
+ * API route uses it to short-circuit with a clean 503 instead of letting
+ * the upstream Lambda reject the body with an opaque "Internal Error".
  *
  * Important: a remote video provider (Cloudinary, Bunny.net, Vimeo)
  * streams the bytes directly from the Lambda to its own storage — the
  * ephemeral filesystem is never touched. In that case uploads are safe
- * even on Netlify, regardless of `STORAGE_PROVIDER`.
+ * on any host, regardless of `STORAGE_PROVIDER`.
  */
 export function getUploadCapabilities(): {
   uploadsEnabled: boolean;
@@ -118,8 +140,6 @@ export function getUploadCapabilities(): {
 } {
   const storageKind = (process.env.STORAGE_PROVIDER ?? "local").toLowerCase();
   const videoKind = (process.env.VIDEO_PROVIDER ?? "local").toLowerCase();
-  const isEphemeralRuntime =
-    process.env.IS_NETLIFY === "true" || process.env.NETLIFY === "true";
 
   // A remote video provider sidesteps the ephemeral FS entirely. Even if
   // STORAGE_PROVIDER is the local stub, no file ever lands on disk for
@@ -127,7 +147,7 @@ export function getUploadCapabilities(): {
   // and we just store the playback URL.
   const remoteVideo = REMOTE_VIDEO_PROVIDERS.has(videoKind);
 
-  if (!remoteVideo && storageKind === "local" && isEphemeralRuntime) {
+  if (!remoteVideo && storageKind === "local" && isEphemeralRuntime()) {
     return {
       uploadsEnabled: false,
       storageProvider: storageKind,
@@ -149,9 +169,9 @@ export function getUploadCapabilities(): {
 export function getStorage(): IStorageProvider {
   if (_provider) return _provider;
   const kind = process.env.STORAGE_PROVIDER ?? "local";
-  // On Netlify (or any serverless host that sets IS_NETLIFY/NETLIFY) the
-  // local filesystem is ephemeral — uploads would silently disappear on the
-  // next cold start. Refuse loudly unless an explicit durable provider is set.
+  // On any serverless host the local filesystem is ephemeral — uploads
+  // would silently disappear on the next cold start. Refuse loudly
+  // unless an explicit durable provider is set.
   const caps = getUploadCapabilities();
   if (!caps.uploadsEnabled) {
     _provider = new EphemeralFsGuardProvider();

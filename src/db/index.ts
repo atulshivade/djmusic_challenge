@@ -13,22 +13,22 @@ const FALLBACK_BUILD_URL = "postgresql://invalid:invalid@127.0.0.1:1/invalid";
 /**
  * Picks a database backend based on env:
  *
- * - `DATABASE_URL=postgresql://…`           → real Postgres via `postgres-js`.
- * - `NETLIFY_DATABASE_URL=postgresql://…`   → same, auto-injected by Netlify DB
- *                                             (managed Neon Postgres) at runtime.
- * - missing / empty                         → embedded **PGlite** persisted to
- *                                             `./.data/pgdata` (zero-install
- *                                             local dev — same SQL dialect).
- * - `DATABASE_URL=memory:`                  → ephemeral in-memory PGlite (tests).
+ * - `DATABASE_URL=postgresql://…`  → real Postgres via `postgres-js`
+ *                                    (Vercel + Neon, Render + Neon, Fly + Neon,
+ *                                    self-hosted Postgres — all the same path).
+ * - missing / empty                → embedded **PGlite** persisted to
+ *                                    `./.data/pgdata` for zero-install local
+ *                                    dev (same SQL dialect, no install).
+ * - `DATABASE_URL=memory:`         → ephemeral in-memory PGlite (tests).
  *
  * Reused across HMR via `globalThis` to avoid pool exhaustion.
  *
- * Note: PGlite is loaded via `require()` inside `buildPgliteSync()` so it never
- * reaches the production server bundle. The OpenNext / Netlify Function packager
- * was including the PGlite WASM binary in the deploy and crashing the Lambda
- * cold start. By keeping the require() out of the static import graph, the
- * Netlify build doesn't pull PGlite in — and at runtime on Netlify the
- * postgres-js path always wins (NETLIFY_DATABASE_URL is set).
+ * Note: PGlite is loaded via `require()` inside `buildPgliteSync()` so it
+ * never reaches the production server bundle. Serverless packagers
+ * (OpenNext, Vercel's nft tracer, etc.) would otherwise pull the PGlite
+ * WASM binary into the deploy and crash the Lambda cold start. By keeping
+ * the require() out of the static import graph, production bundles only
+ * ship postgres-js and the WASM never gets baked in.
  */
 function buildPgliteSync():
   | ReturnType<typeof drizzlePostgres>
@@ -36,9 +36,10 @@ function buildPgliteSync():
   try {
     /* eslint-disable @typescript-eslint/no-require-imports --
      * Intentional dynamic requires: keep PGlite (and its WASM binary) out of
-     * the OpenNext / Netlify Function static import graph so the production
-     * bundle only ships postgres-js. Without this, Lambda cold start crashes
-     * trying to load PGlite's bundled WASM. See commit c5bf91c.
+     * the serverless packager's static import graph (Vercel nft, OpenNext,
+     * AWS Lambda bundler, etc.) so the production bundle only ships
+     * postgres-js. Without this, Lambda cold start crashes trying to load
+     * PGlite's bundled WASM. See commit c5bf91c.
      */
     const { mkdirSync } = require("node:fs") as typeof import("node:fs");
     const path = require("node:path") as typeof import("node:path");
@@ -48,7 +49,7 @@ function buildPgliteSync():
       require("@electric-sql/pglite") as typeof import("@electric-sql/pglite");
     /* eslint-enable @typescript-eslint/no-require-imports */
 
-    const url = process.env.DATABASE_URL ?? process.env.NETLIFY_DATABASE_URL ?? process.env.NETLIFY_DB_URL;
+    const url = process.env.DATABASE_URL;
     if (url === "memory:") {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       return drizzlePglite(new PGlite() as any, { schema }) as unknown as ReturnType<typeof drizzlePostgres>;
@@ -65,7 +66,7 @@ function buildPgliteSync():
 }
 
 function buildDb(): ReturnType<typeof drizzlePostgres> {
-  const url = process.env.DATABASE_URL ?? process.env.NETLIFY_DATABASE_URL ?? process.env.NETLIFY_DB_URL;
+  const url = process.env.DATABASE_URL;
   const isBuildPhase = process.env.NEXT_PHASE === "phase-production-build";
 
   // Real Postgres path — preferred whenever a URL is set.
