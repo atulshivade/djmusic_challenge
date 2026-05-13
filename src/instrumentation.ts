@@ -30,10 +30,47 @@ export async function register() {
     }
   }
 
-  const { dbKind } = await import("./db");
-  if (dbKind !== "pglite") return;
+  const { dbKind, db } = await import("./db");
 
-  const { applyMigrations } = await import("./db/migrate");
-  await applyMigrations();
-  console.log("[db] PGlite ready (.data/pgdata) — migrations applied.");
+  if (dbKind === "pglite") {
+    const { applyMigrations } = await import("./db/migrate");
+    await applyMigrations();
+    console.log("[db] PGlite ready (.data/pgdata) — migrations applied.");
+    return;
+  }
+
+  // On the production postgres path (Netlify-managed Postgres / Neon /
+  // Supabase) auto-apply the idempotent schema bootstrap so adding a new
+  // enum value or column on a deploy never requires the operator to
+  // manually hit `/api/admin/dbinit?secret=…`.
+  //
+  // Every statement uses `IF NOT EXISTS` or a DO/EXCEPTION block so this
+  // is cheap and safe to run on every cold start. The bootstrap completes
+  // in well under a second on a warm Neon, and we cache the promise on
+  // `globalThis` so concurrent invocations on the same Lambda instance
+  // share a single run.
+  //
+  // Opt out by setting `SCHEMA_AUTOHEAL=false` if you prefer to manage
+  // migrations entirely out-of-band (e.g. via Drizzle Kit CI).
+  if (process.env.SCHEMA_AUTOHEAL === "false") {
+    console.log(
+      "[db] SCHEMA_AUTOHEAL=false — skipping schema bootstrap on cold start.",
+    );
+    return;
+  }
+  try {
+    const { applySchemaBootstrap } = await import("./db/schema-bootstrap");
+    const n = await applySchemaBootstrap(db);
+    console.log(
+      `[db] postgres schema bootstrap applied — ${n} idempotent statements ran.`,
+    );
+  } catch (err) {
+    // Don't crash the server on a bootstrap failure — the dbinit route
+    // remains the manual escape hatch. Just log loudly so it's obvious
+    // in the Netlify function logs.
+    console.error(
+      "[db] postgres schema bootstrap FAILED — fall back to /api/admin/dbinit?secret=… to recover:",
+      err,
+    );
+  }
 }

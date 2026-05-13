@@ -5,6 +5,8 @@ import { parseCloudinaryUrl } from "../../src/lib/video";
 import { VIDEO_PROVIDER_VALUES } from "../../src/lib/validators";
 import { videoProviderEnum } from "../../src/db/schema";
 import { getUploadCapabilities } from "../../src/lib/storage";
+import { classifyActionFailure } from "../../src/lib/action-errors";
+import { SCHEMA_STATEMENTS } from "../../src/db/schema-bootstrap";
 
 /**
  * Tiny harness for the env-driven capability matrix. We need to flip
@@ -177,7 +179,12 @@ test.describe("Admin sees recent student submissions", () => {
       .locator("a[href^='/challenges/']")
       .first();
     await firstChallengeLink.click();
-    await studentPage.waitForURL(/\/challenges\/[^/]+/, { timeout: 15_000 });
+    // Generous timeout: on a cold Turbopack dev server the first compile
+    // of `/challenges/[id]` can take ~15 s by itself, which used to leave
+    // `waitForURL` racing the compiler. 60 s gives the compiler enough
+    // headroom in CI / corporate-proxy environments without masking real
+    // regressions (the next page interaction has its own assertion).
+    await studentPage.waitForURL(/\/challenges\/[^/]+/, { timeout: 60_000 });
 
     await studentPage
       .getByRole("tab", { name: /paste link/i })
@@ -446,7 +453,11 @@ test.describe("Student → Cloudinary file upload → Teacher dashboard", () => 
       .locator("a[href^='/challenges/']")
       .first()
       .click();
-    await studentPage.waitForURL(/\/challenges\/[^/]+/, { timeout: 15_000 });
+    // Cold Turbopack compile of `/challenges/[id]` can take ~15 s. The
+    // upload phase after this also has its own timeout, so a generous
+    // routing window here just absorbs first-compile latency without
+    // masking the actual upload assertions.
+    await studentPage.waitForURL(/\/challenges\/[^/]+/, { timeout: 60_000 });
 
     // Stay on the FILE tab (default when uploads are enabled). Attach the
     // tiny mp4 fixture so the real /api/upload/video → Cloudinary path
@@ -485,5 +496,100 @@ test.describe("Student → Cloudinary file upload → Teacher dashboard", () => 
     await expect(
       page.getByText(uniqueTitle).first(),
     ).toBeVisible({ timeout: 10_000 });
+  });
+});
+
+/**
+ * Error-classifier coverage.
+ *
+ * This is the safety net for the "Internal Server Error" production
+ * incident: every server action now funnels its catch through
+ * `classifyActionFailure()`, which maps known failure modes to actionable
+ * messages instead of letting Next.js emit an opaque digest. The test
+ * locks the mapping table — if a hint string drifts, the operator
+ * documentation drifts too, and that's a P2 we want to catch in CI.
+ */
+test.describe("classifyActionFailure() error mapping", () => {
+  test("Postgres enum-drift error points the operator at dbinit / autoheal", () => {
+    const err = new Error(
+      'invalid input value for enum video_provider: "CLOUDINARY"',
+    );
+    const result = classifyActionFailure(err);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/Database schema is behind/i);
+    expect(result.error).toMatch(/\/api\/admin\/dbinit/);
+    // Original cause must still be reachable for the operator.
+    expect(result.error).toMatch(/CLOUDINARY/);
+  });
+
+  test("foreign-key violation surfaces a refresh hint, not a constraint name", () => {
+    const err = new Error(
+      'insert or update on table "performance" violates foreign key constraint "performance_challenge_id_challenge_id_fk"',
+    );
+    const result = classifyActionFailure(err);
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/referenced row is missing/i);
+    expect(result.error).toMatch(/Refresh and try again/);
+  });
+
+  test("unknown errors fall back to a friendly message", () => {
+    const err = new Error("something else went wrong");
+    const result = classifyActionFailure(err);
+    expect(result.ok).toBe(false);
+    // In dev / test mode we see the raw message.
+    expect(result.error).toMatch(/something else/);
+  });
+
+  test("non-Error throwables are stringified safely", () => {
+    const result = classifyActionFailure("naked string");
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/naked string/);
+  });
+});
+
+/**
+ * Schema-bootstrap sanity check.
+ *
+ * The instrumentation hook now runs `SCHEMA_STATEMENTS` on every cold
+ * start of the production Postgres path. Each statement MUST be
+ * idempotent so concurrent Lambdas can't trip over each other and a
+ * warm start incurs no penalty.
+ *
+ * We can't easily run them against a real DB inside the e2e suite, but
+ * we CAN lock the invariants that every statement must have at least
+ * one of the recognised idempotency guards.
+ */
+test.describe("SCHEMA_STATEMENTS idempotency invariants", () => {
+  test("every statement uses IF NOT EXISTS, ADD VALUE IF NOT EXISTS, or DO/EXCEPTION", () => {
+    const guardRegex =
+      /(IF NOT EXISTS|ADD VALUE IF NOT EXISTS|EXCEPTION WHEN duplicate_object)/i;
+    const bad = SCHEMA_STATEMENTS.filter((s) => !guardRegex.test(s));
+    expect(
+      bad,
+      `Found ${bad.length} non-idempotent statement(s):\n${bad
+        .map((s) => "  • " + s.slice(0, 80))
+        .join("\n")}`,
+    ).toEqual([]);
+  });
+
+  test("CLOUDINARY appears in the video_provider enum definition (current schema)", () => {
+    const enumDef = SCHEMA_STATEMENTS.find(
+      (s) => s.includes(`CREATE TYPE "public"."video_provider"`),
+    );
+    expect(enumDef, "video_provider enum definition is missing").toBeTruthy();
+    expect(enumDef!).toMatch(/'CLOUDINARY'/);
+  });
+
+  test("an idempotent ADD VALUE statement exists for CLOUDINARY (heals legacy DBs)", () => {
+    const top = SCHEMA_STATEMENTS.find(
+      (s) =>
+        s.includes(`ALTER TYPE "public"."video_provider"`) &&
+        s.includes(`'CLOUDINARY'`),
+    );
+    expect(
+      top,
+      "no ALTER TYPE … ADD VALUE IF NOT EXISTS 'CLOUDINARY' — legacy DBs will not self-heal",
+    ).toBeTruthy();
+    expect(top!).toMatch(/ADD VALUE IF NOT EXISTS/);
   });
 });
