@@ -63,3 +63,6 @@ next-env.d.ts
 /WhatsApp Video*.mp4
 /WhatsApp Image*.jpg
 /WhatsApp Image*.png
+
+# Deploy-time secrets stash (DO NOT COMMIT)
+.deploy-credentials.txt
