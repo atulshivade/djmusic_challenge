@@ -11,6 +11,7 @@ spotlight. Mobile-first banded layout that scales cleanly to laptop and tablet.
 
 ## Live demo
 
+- **Production:** https://shred-sound-music.logicboxlab.com
 - **Source:** https://github.com/atulshivade/shred-sound-music
 - **Local URL:** http://localhost:3000 (run `npm run dev`)
 - **Teacher login:** `admin@portal.dev` / `Password123`
@@ -18,9 +19,9 @@ spotlight. Mobile-first banded layout that scales cleanly to laptop and tablet.
 
 > The seed includes 3 challenges, 2 sample performances and one **Best
 > Performer** (Riya's Chopin take). When deploying to a serverless host
-> (Vercel, AWS Lambda, Netlify, Cloudflare Workers) point `VIDEO_PROVIDER`
-> at a remote provider (Cloudinary / Bunny / Vimeo) so the FILE upload
-> tab stays enabled — the [Deploying](#deploying) section below walks
+> (Vercel, AWS Lambda, Cloudflare Workers, …) point `VIDEO_PROVIDER` at
+> a remote provider (Cloudinary / Bunny / Vimeo) so the FILE upload tab
+> stays enabled — the [Deploying](#deploying) section below walks
 > through the env vars step-by-step.
 
 ---
